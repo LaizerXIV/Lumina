@@ -1,16 +1,5 @@
 version: "1"
 rules:
   - base: master
-    mergeMethod: hardreset
-
-  - base: develop
-    mergeMethod: hardreset
-
-  - base: feature/umbra
-    mergeMethod: hardreset
-
-  - base: experimental/generator_rewrite
-    mergeMethod: hardreset
-
-  - base: docs-nuget
+    upstream: NotAdam:master    # change `wei` to the owner of upstream repo
     mergeMethod: hardreset
