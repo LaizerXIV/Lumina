@@ -1,0 +1,17 @@
+version: "1"
+rules:
+  - base: master
+    upstream: NotAdam:master
+    mergeMethod: hardreset
+  - base: develop
+    upstream: NotAdam:develop
+    mergeMethod: hardreset
+  - base: feature/umbra
+    upstream: NotAdam:feature/umbra
+    mergeMethod: hardreset
+  - base: experimental/generator_rewrite
+    upstream: NotAdam:experimental/generator_rewrite
+    mergeMethod: hardreset
+  - base: docs-nuget
+    upstream: NotAdam:docs-nuget
+    mergeMethod: hardreset
