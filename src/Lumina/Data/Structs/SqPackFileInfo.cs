@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 
 // ReSharper disable MemberCanBePrivate.Global
@@ -67,6 +68,13 @@ namespace Lumina.Data.Structs
         public UInt32 DecompressedSize;
         public UInt32 BlockOffset;
         public UInt32 BlockCount;
+    }
+
+    [StructLayout( LayoutKind.Sequential )]
+    public struct ReferenceBlockRange
+    {
+        public UInt32 Begin;
+        public UInt32 End;
     }
 
     [StructLayout( LayoutKind.Sequential )]

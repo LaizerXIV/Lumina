@@ -1,7 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
+using Lumina.Data;
 using Lumina.Data.Files;
 using Lumina.Data.Parsing;
 using Lumina.Extensions;
@@ -9,7 +11,7 @@ using Lumina.Models.Models;
 
 namespace Lumina.Models.Materials
 {
-    public class Material
+    public partial class Material
     {
         /// <summary>
         /// The path to this Material. May be relative or absolute.
@@ -136,20 +138,34 @@ namespace Lumina.Models.Materials
             return this;
         }
 
+        /// <inheritdoc cref="ResolveRelativeMaterialPath(string,int,bool)"/>
+        /// <remarks>This overload is present to maintain compatibility with already compiled binaries and will eventually be removed.</remarks>
+        [OverloadResolutionPriority( 0 )]
+        public static string? ResolveRelativeMaterialPath( string relativePath, int variantId )
+            => ResolveRelativeMaterialPath( relativePath, variantId, true );
+
         /// <summary>
         /// Resolves a relative material path in the form <c>/mt_c0101e0001_top_a.mtrl</c>
         /// into its full path, <c>chara/equipment/e0001/material/v{variantId}/mt_c0101e0001_top_a.mtrl</c>.
+        /// <br/>The Regex used to search is contained in the partial that follows the function.
         /// <br/>This method will successfully resolve all known relative material paths.
         /// </summary>
         /// <param name="relativePath">The relative path of the provided material.</param>
         /// <param name="variantId">The variant to use in material resolution.</param>
+        /// <param name="strictSuffixValidation">Whether to strictly validate suffixes. If dealing with mods, you may want to turn this off.</param>
         /// <returns>The resolved, absolute path to the requested material, or null if unsuccessful.</returns>
-        public static string? ResolveRelativeMaterialPath( string relativePath, int variantId )
+        [OverloadResolutionPriority( 1 )]
+        public static string? ResolveRelativeMaterialPath( string relativePath, int variantId, bool strictSuffixValidation = true )
         {
-            var id1 = relativePath[4];
-            var val1 = relativePath.Substring( 5, 4 );
-            var id2 = relativePath[9];
-            var val2 = relativePath.Substring( 10, 4 );
+            Regex rx = strictSuffixValidation ? MatNameRegexStrictSuffix() : MatNameRegexLaxSuffix();
+            var result = rx.Match( relativePath );
+            if( !result.Success )
+                return null;
+
+            var id1 = result.Groups[ "id1" ].Value[ 0 ];
+            var val1 = result.Groups[ "val1" ].Value;
+            var id2 = result.Groups[ "id2" ].Value[ 0 ];
+            var val2 = result.Groups[ "val2" ].Value;
 
             return ( id1, id2 ) switch
             {
@@ -166,7 +182,14 @@ namespace Lumina.Models.Materials
                 (_, _) => null
             };
         }
-        
+
+        [GeneratedRegex( @"/mt_(?'id1'[cdmw])(?'val1'\d{4})(?'id2'[abefhtze])(?'val2'\d{4})_(?:\w{3}_\w|\w)\.mtrl$" )]
+        private static partial Regex MatNameRegexStrictSuffix();
+
+        [GeneratedRegex( @"/mt_(?'id1'[cdmw])(?'val1'\d{4})(?'id2'[abefhtze])(?'val2'\d{4})_\w+\.mtrl$" )]
+        private static partial Regex MatNameRegexLaxSuffix();
+
+
         /// <summary>
         /// Parse the variant ID out of an existing absolute path to a .mtrl file.
         /// </summary>
@@ -212,13 +235,12 @@ namespace Lumina.Models.Materials
         private void ReadStrings()
         {
             StringOffsetToStringMap = new Dictionary< int, string >();
-            var mr = new MemoryStream( File.Strings );
-            var br = new BinaryReader( mr );
+            var br = new LuminaBinaryReader( File.Strings );
 
             // They re-use offsets, so the number of offsets is not equal to the number of unique members
             var uniqueTextureCount = File.TextureOffsets.Select( t => t.Offset ).Distinct().Count();
             var uniqueUvColorSetCount = File.UvColorSets.Select( t => t.NameOffset ).Distinct().Count();
-            var uniqueColorOffsetCount = File.ColorSetOffsets.Select( t => t ).Distinct().Count();
+            var uniqueColorOffsetCount = File.ColorSets.Select( t => t.NameOffset ).Distinct().Count();
 
             // Add one for the shader package name at the end
             var stringCount = uniqueTextureCount + uniqueUvColorSetCount + uniqueColorOffsetCount + 1;
@@ -230,7 +252,6 @@ namespace Lumina.Models.Materials
             }
 
             br.Dispose();
-            mr.Dispose();
         }
     }
 }

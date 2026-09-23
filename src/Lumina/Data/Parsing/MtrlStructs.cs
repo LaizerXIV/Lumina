@@ -1,4 +1,6 @@
-﻿namespace Lumina.Data.Parsing
+using System.Buffers.Binary;
+
+namespace Lumina.Data.Parsing
 {
     /**
      * These values are actually CRC values used by SE in order to
@@ -27,6 +29,7 @@
         SamplerSpecularMap0 = 0x1BBC2F12,
         SamplerSpecularMap1 = 0x6CBB1F84,
         SamplerWaveMap = 0xE6321AFC,
+        SamplerWaveMap1 = 0xE5338C17,
         SamplerWaveletMap0 = 0x574E22D6,
         SamplerWaveletMap1 = 0x20491240,
         SamplerWhitecapMap = 0x95E1F64D
@@ -43,6 +46,26 @@
         public byte UvSetCount;
         public byte ColorSetCount;
         public byte AdditionalDataSize;
+
+        public static MaterialFileHeader Read( LuminaBinaryReader br )
+        {
+            var ret = new MaterialFileHeader();
+
+            ret.Version = br.ReadUInt32();
+
+            var fileSize = br.ReadUInt32();
+            ret.FileSize = (ushort)fileSize;
+            ret.DataSetSize = (ushort)( fileSize >> 16 );
+
+            ret.StringTableSize = br.ReadUInt16();
+            ret.ShaderPackageNameOffset = br.ReadUInt16();
+            ret.TextureCount = br.ReadByte();
+            ret.UvSetCount = br.ReadByte();
+            ret.ColorSetCount = br.ReadByte();
+            ret.AdditionalDataSize = br.ReadByte();
+
+            return ret;
+        }
     }
 
     public struct MaterialHeader
@@ -85,7 +108,15 @@
     public struct UvColorSet
     {
         public ushort NameOffset;
-        public ushort Index;
+        public byte Index;
+        public byte Unknown1;
+    }
+
+    public struct ColorSet
+    {
+        public ushort NameOffset;
+        public byte Index;
+        public byte Unknown1;
     }
 
     public unsafe struct ColorSetInfo

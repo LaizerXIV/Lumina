@@ -1,9 +1,9 @@
-using System.IO;
-
 // ReSharper disable UnusedMember.Global
 // ReSharper disable NotAccessedField.Global
 // ReSharper disable NotAccessedField.Local
 // ReSharper disable MemberCanBePrivate.Global
+using System;
+
 namespace Lumina.Data.Parsing.Uld
 {
     public interface INode
@@ -43,6 +43,31 @@ namespace Lumina.Data.Parsing.Uld
             Tile = 0x1,
         }
 
+        [Flags]
+        public enum TextFlags : byte
+        {
+            None = 0,
+            Bold = 1 << 0,
+            Italic = 1 << 1,
+            Edge = 1 << 2,
+            Glare = 1 << 3,
+            Multiline = 1 << 4,
+            Ellipsis = 1 << 5,
+            WordWrap = 1 << 6,
+            Emboss = 1 << 7, // only used for the Dark theme
+        }
+
+        [Flags]
+        public enum TextFlags2 : byte
+        {
+            None = 0,
+            Unk1 = 1 << 0,
+            /// <summary> If <see langword="true"/>, look up <see cref="TextNode.Color"/> in the UIColor sheet. Otherwise, use the Color value directly. </summary>
+            IsUIColor = 1 << 1,
+            /// <summary> If <see langword="true"/>, look up <see cref="TextNode.EdgeColor"/> in the UIColor sheet. Otherwise, use the EdgeColor value directly. </summary>
+            IsUIEdgeColor = 1 << 2,
+        }
+
         public enum SheetType : byte
         {
             Addon = 0x0,
@@ -59,7 +84,7 @@ namespace Lumina.Data.Parsing.Uld
             public byte Wrap;
             public byte Unk1;
 
-            public static ImageNode Read( BinaryReader br )
+            public static ImageNode Read( LuminaBinaryReader br )
             {
                 ImageNode ret = new ImageNode();
                 ret.PartListId = br.ReadUInt32();
@@ -82,10 +107,11 @@ namespace Lumina.Data.Parsing.Uld
             public short BottomOffset;
             public short LeftOffset;
             public short RightOffset;
-            public byte Unk1;
+            public byte BlendMode;
+            [Obsolete( "Renamed to BlendMode" )] public byte Unk1;
             public byte Unk2;
 
-            public static NineGridNode Read( BinaryReader br )
+            public static NineGridNode Read( LuminaBinaryReader br )
             {
                 NineGridNode ret = new NineGridNode();
                 ret.PartListId = br.ReadUInt32();
@@ -96,7 +122,8 @@ namespace Lumina.Data.Parsing.Uld
                 ret.BottomOffset = br.ReadInt16();
                 ret.LeftOffset = br.ReadInt16();
                 ret.RightOffset = br.ReadInt16();
-                ret.Unk1 = br.ReadByte();
+                ret.BlendMode = br.ReadByte();
+                ret.Unk1 = ret.BlendMode;
                 ret.Unk2 = br.ReadByte();
                 return ret;
             }
@@ -112,7 +139,7 @@ namespace Lumina.Data.Parsing.Uld
             public ushort Alignment;
             public ushort Unk1;
 
-            public static CounterNode Read( BinaryReader br )
+            public static CounterNode Read( LuminaBinaryReader br )
             {
                 CounterNode ret = new CounterNode();
                 ret.PartListId = br.ReadUInt32();
@@ -130,54 +157,39 @@ namespace Lumina.Data.Parsing.Uld
         {
             public uint TextId;
             public uint Color;
-            public ushort Alignment;
+            public byte Alignment;
             public FontType Font;
             public byte FontSize;
             public uint EdgeColor;
 
-            private byte field1;
-
-            public bool Bold;
-            public bool Italic;
-            public bool Edge;
-            public bool Glare;
-            public bool Multiline;
-            public bool Ellipsis;
-            public bool Paragraph;
-            public bool Emboss;
+            public TextFlags TextFlags;
 
             public SheetType SheetType;
             public byte CharSpacing;
             public byte LineSpacing;
 
-            public uint Unk2;
+            public TextFlags2 TextFlags2;
 
-            public static TextNode Read( BinaryReader br )
+            public static TextNode Read( LuminaBinaryReader br )
             {
                 TextNode ret = new TextNode();
                 ret.TextId = br.ReadUInt32();
                 ret.Color = br.ReadUInt32();
-                ret.Alignment = br.ReadUInt16();
+                ret.Alignment = br.ReadByte();
+                br.ReadByte(); // unused
                 ret.Font = (FontType)br.ReadByte();
                 ret.FontSize = br.ReadByte();
                 ret.EdgeColor = br.ReadUInt32();
 
-                ret.field1 = br.ReadByte();
-
-                ret.Bold = ( ret.field1 & 0x80 ) == 0x80;
-                ret.Italic = ( ret.field1 & 0x40 ) == 0x40;
-                ret.Edge = ( ret.field1 & 0x20 ) == 0x20;
-                ret.Glare = ( ret.field1 & 0x10 ) == 0x10;
-                ret.Multiline = ( ret.field1 & 0x08 ) == 0x08;
-                ret.Ellipsis = ( ret.field1 & 0x04 ) == 0x04;
-                ret.Paragraph = ( ret.field1 & 0x02 ) == 0x02;
-                ret.Emboss = ( ret.field1 & 0x01 ) == 0x01;
+                ret.TextFlags = (TextFlags)br.ReadByte();
 
                 ret.SheetType = (SheetType)br.ReadByte();
                 ret.CharSpacing = br.ReadByte();
                 ret.LineSpacing = br.ReadByte();
 
-                ret.Unk2 = br.ReadUInt32();
+                ret.TextFlags2 = (TextFlags2)br.ReadByte();
+                br.ReadBytes( 3 ); // unused
+
                 return ret;
             }
         }
@@ -200,7 +212,7 @@ namespace Lumina.Data.Parsing.Uld
 
             public byte[] Unk2;
 
-            public static NumericInputNode Read( BinaryReader br )
+            public static NumericInputNode Read( LuminaBinaryReader br )
             {
                 NumericInputNode ret = new NumericInputNode();
                 ret.TextNode = TextNode.Read( br );
@@ -230,7 +242,7 @@ namespace Lumina.Data.Parsing.Uld
             public int Y;
             public uint Radius;
 
-            public static CollisionNode Read( BinaryReader br )
+            public static CollisionNode Read( LuminaBinaryReader br )
             {
                 CollisionNode ret = new CollisionNode();
                 ret.Type = (CollisionType)br.ReadUInt16();
@@ -263,7 +275,7 @@ namespace Lumina.Data.Parsing.Uld
             public short OffsetX;
             public short OffsetY;
 
-            public static FocusNode Read( BinaryReader br )
+            public static FocusNode Read( LuminaBinaryReader br )
             {
                 FocusNode ret = new FocusNode();
                 ret.Index = br.ReadByte();
@@ -321,7 +333,7 @@ namespace Lumina.Data.Parsing.Uld
             public ushort Charset;
             public char[] CharsetExtras;
 
-            public static TextInputNode Read( BinaryReader br )
+            public static TextInputNode Read( LuminaBinaryReader br )
             {
                 TextInputNode ret = new TextInputNode();
                 ret.TextNode = TextNode.Read( br );
@@ -381,7 +393,7 @@ namespace Lumina.Data.Parsing.Uld
 
             public INode ComponentNodeData;
 
-            public static ComponentNode Read( BinaryReader br, ComponentData.ComponentType parentType )
+            public static ComponentNode Read( LuminaBinaryReader br, ComponentData.ComponentType parentType )
             {
                 ComponentNode ret = new ComponentNode();
                 ret.Index = br.ReadByte();
@@ -466,7 +478,7 @@ namespace Lumina.Data.Parsing.Uld
         {
             public uint TextId;
 
-            public static ButtonComponentNode Read( BinaryReader br )
+            public static ButtonComponentNode Read( LuminaBinaryReader br )
             {
                 ButtonComponentNode ret = new ButtonComponentNode();
                 ret.TextId = br.ReadUInt32();
@@ -483,7 +495,7 @@ namespace Lumina.Data.Parsing.Uld
             public bool HelpButton;
             public bool Header;
 
-            public static WindowComponentNode Read( BinaryReader br )
+            public static WindowComponentNode Read( LuminaBinaryReader br )
             {
                 WindowComponentNode ret = new WindowComponentNode();
                 ret.TitleTextId = br.ReadUInt32();
@@ -500,7 +512,7 @@ namespace Lumina.Data.Parsing.Uld
         {
             public uint TextId;
 
-            public static CheckBoxComponentNode Read( BinaryReader br )
+            public static CheckBoxComponentNode Read( LuminaBinaryReader br )
             {
                 CheckBoxComponentNode ret = new CheckBoxComponentNode();
                 ret.TextId = br.ReadUInt32();
@@ -513,7 +525,7 @@ namespace Lumina.Data.Parsing.Uld
             public uint TextId;
             public uint GroupId;
 
-            public static RadioButtonComponentNode Read( BinaryReader br )
+            public static RadioButtonComponentNode Read( LuminaBinaryReader br )
             {
                 RadioButtonComponentNode ret = new RadioButtonComponentNode();
                 ret.TextId = br.ReadUInt32();
@@ -529,7 +541,7 @@ namespace Lumina.Data.Parsing.Uld
             public int Max;
             public int Value;
 
-            public static GaugeComponentNode Read( BinaryReader br )
+            public static GaugeComponentNode Read( LuminaBinaryReader br )
             {
                 GaugeComponentNode ret = new GaugeComponentNode();
                 ret.Indicator = br.ReadInt32();
@@ -546,7 +558,7 @@ namespace Lumina.Data.Parsing.Uld
             public int Max;
             public int Step;
 
-            public static SliderComponentNode Read( BinaryReader br )
+            public static SliderComponentNode Read( LuminaBinaryReader br )
             {
                 SliderComponentNode ret = new SliderComponentNode();
                 ret.Min = br.ReadInt32();
@@ -586,7 +598,7 @@ namespace Lumina.Data.Parsing.Uld
             public ushort Charset;
             public char[] CharsetExtras;
 
-            public static TextInputComponentNode Read( BinaryReader br )
+            public static TextInputComponentNode Read( LuminaBinaryReader br )
             {
                 TextInputComponentNode ret = new TextInputComponentNode();
                 ret.MaxWidth = br.ReadUInt32();
@@ -626,20 +638,22 @@ namespace Lumina.Data.Parsing.Uld
             public int Max;
             public int Min;
             public int Add;
-            public uint Unk1;
+            public uint EndLetterId;
+            [Obsolete( "Renamed to EndLetterId" )] public uint Unk1;
             public bool Comma;
             public byte[] Unk2;
 
-            public static NumericInputComponentNode Read( BinaryReader br )
+            public static NumericInputComponentNode Read( LuminaBinaryReader br )
             {
                 NumericInputComponentNode ret = new NumericInputComponentNode();
                 ret.Value = br.ReadInt32();
                 ret.Max = br.ReadInt32();
                 ret.Min = br.ReadInt32();
                 ret.Add = br.ReadInt32();
-                ret.Unk1 = br.ReadUInt32();
+                ret.EndLetterId = br.ReadUInt32();
+                ret.Unk1 = ret.EndLetterId;
                 ret.Comma = br.ReadBoolean();
-                ret.Unk2 = br.ReadBytes( 16 );
+                ret.Unk2 = br.ReadBytes( 3 );
                 return ret;
             }
         }
@@ -649,7 +663,7 @@ namespace Lumina.Data.Parsing.Uld
             public ushort RowNum;
             public ushort ColumnNum;
 
-            public static ListComponentNode Read( BinaryReader br )
+            public static ListComponentNode Read( LuminaBinaryReader br )
             {
                 ListComponentNode ret = new ListComponentNode();
                 ret.RowNum = br.ReadUInt16();
@@ -663,7 +677,7 @@ namespace Lumina.Data.Parsing.Uld
             public uint TextId;
             public uint GroupId;
 
-            public static TabbedComponentNode Read( BinaryReader br )
+            public static TabbedComponentNode Read( LuminaBinaryReader br )
             {
                 TabbedComponentNode ret = new TabbedComponentNode();
                 ret.TextId = br.ReadUInt32();
@@ -677,7 +691,7 @@ namespace Lumina.Data.Parsing.Uld
             public bool Toggle;
             public byte[] Unk1;
 
-            public static ListItemComponentNode Read( BinaryReader br )
+            public static ListItemComponentNode Read( LuminaBinaryReader br )
             {
                 ListItemComponentNode ret = new ListItemComponentNode();
                 ret.Toggle = br.ReadBoolean();
@@ -690,7 +704,7 @@ namespace Lumina.Data.Parsing.Uld
         {
             uint TextId;
 
-            public static NineGridTextComponentNode Read( BinaryReader br )
+            public static NineGridTextComponentNode Read( LuminaBinaryReader br )
             {
                 NineGridTextComponentNode ret = new NineGridTextComponentNode();
                 ret.TextId = br.ReadUInt32();

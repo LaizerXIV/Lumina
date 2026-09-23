@@ -1,7 +1,4 @@
-using System;
-using System.IO;
 using System.Linq;
-using Lumina.Extensions;
 
 // ReSharper disable UnusedMember.Global
 // ReSharper disable NotAccessedField.Global
@@ -14,7 +11,7 @@ namespace Lumina.Data.Parsing.Uld
     /// </summary>
     public static class UldRoot
     {
-        public enum AlignmentType
+        public enum AlignmentType : byte
         {
             TopLeft = 0x0,
             Top = 0x1,
@@ -77,7 +74,7 @@ namespace Lumina.Data.Parsing.Uld
             public uint ComponentOffset;
             public uint WidgetOffset;
 
-            public static UldHeader Read( BinaryReader br )
+            public static UldHeader Read( LuminaBinaryReader br )
             {
                 UldHeader ret = new UldHeader();
                 ret.Identifier = br.ReadChars( 4 );
@@ -102,7 +99,7 @@ namespace Lumina.Data.Parsing.Uld
             public uint RewriteDataOffset; //dunno what this is exactly
             public uint TimelineListSize;
 
-            public static AtkHeader Read( BinaryReader br )
+            public static AtkHeader Read( LuminaBinaryReader br )
             {
                 AtkHeader ret = new AtkHeader();
                 ret.Identifier = br.ReadChars( 4 );
@@ -122,18 +119,24 @@ namespace Lumina.Data.Parsing.Uld
         {
             public uint Id;
             public char[] Path; // 44? wtf?
+            public uint IconId;
+            public byte ThemeSupportBitmask; // Only used when WidgetData.AssetsHaveThemeSupport is true. Example: 4 (0b100) means it's only available in fourth/, while 7 (0b111) means it's available in light/, third/ and fourth/
 
-            //unk2 seems to always be 1
-            public uint Unk1;
-            public uint Unk2;
-
-            public static TextureEntry Read( BinaryReader br )
+            public static TextureEntry Read( LuminaBinaryReader br, uint version )
             {
                 TextureEntry ret = new TextureEntry();
                 ret.Id = br.ReadUInt32();
                 ret.Path = br.ReadChars( 44 );
-                ret.Unk1 = br.ReadUInt32();
-                ret.Unk2 = br.ReadUInt32();
+                ret.IconId = br.ReadUInt32();
+                if ( version > 100 )
+                {
+                    ret.ThemeSupportBitmask = br.ReadByte();
+                    br.BaseStream.Position += 3;
+                }
+                else
+                {
+                    ret.ThemeSupportBitmask = 0;
+                }
                 return ret;
             }
         }
@@ -146,7 +149,7 @@ namespace Lumina.Data.Parsing.Uld
             public uint ElementCount; // this lists kinda arbitrary things (cohd, ashd etc) so they are elements
             public int Unk1;
 
-            public static PartHeader Read( BinaryReader br )
+            public static PartHeader Read( LuminaBinaryReader br )
             {
                 PartHeader ret = new PartHeader();
                 ret.Identifier = br.ReadChars( 4 );
@@ -167,7 +170,7 @@ namespace Lumina.Data.Parsing.Uld
 
             public PartData[] Parts;
 
-            public static PartsData Read( BinaryReader br )
+            public static PartsData Read( LuminaBinaryReader br )
             {
                 PartsData ret = new PartsData();
                 ret.Id = br.ReadUInt32();
@@ -188,7 +191,7 @@ namespace Lumina.Data.Parsing.Uld
             public ushort W;
             public ushort H;
 
-            public static PartData Read( BinaryReader br )
+            public static PartData Read( LuminaBinaryReader br )
             {
                 PartData ret = new PartData();
                 ret.TextureId = br.ReadUInt32();
@@ -254,8 +257,10 @@ namespace Lumina.Data.Parsing.Uld
             // have to trial and error the nodes - this is to prevent failure to read
             public byte[] UnknownNodeData;
 
-            public static NodeData Read( BinaryReader br, ComponentData[] definedComponentList )
+            public static NodeData Read( LuminaBinaryReader br, ComponentData[] definedComponentList )
             {
+                long originalPos = br.BaseStream.Position;
+
                 NodeData ret = new NodeData();
                 ret.NodeId = br.ReadUInt32();
                 ret.ParentId = br.ReadInt32();
@@ -265,7 +270,7 @@ namespace Lumina.Data.Parsing.Uld
                 ret.NodeType = br.ReadInt32();
                 ret.NodeOffset = br.ReadUInt16();
                 ret.TabIndex = br.ReadInt16();
-                ret.Unk1 = br.ReadStructures< Int32 >( 4 ).ToArray();
+                ret.Unk1 = br.ReadInt32Array( 4 );
                 ret.X = br.ReadInt16();
                 ret.Y = br.ReadInt16();
                 ret.W = br.ReadUInt16();
@@ -336,6 +341,9 @@ namespace Lumina.Data.Parsing.Uld
                         break;
                 }
 
+                // adjust stream position to match actual data size
+                br.BaseStream.Position = originalPos + ret.NodeOffset;
+
                 return ret;
             }
         }
@@ -353,8 +361,10 @@ namespace Lumina.Data.Parsing.Uld
             public IComponent Component;
             public NodeData[] Nodes;
 
-            public static ComponentData Read( BinaryReader br, ComponentData[] definedComponentList )
+            public static ComponentData Read( LuminaBinaryReader br, ComponentData[] definedComponentList )
             {
+                long originalPos = br.BaseStream.Position;
+
                 ComponentData ret = new ComponentData();
                 ret.Id = br.ReadUInt32();
                 ret.ShouldIgnoreInput = br.ReadBoolean();
@@ -394,8 +404,8 @@ namespace Lumina.Data.Parsing.Uld
                     case Uld.ComponentData.ComponentType.List:
                         ret.Component = Uld.ComponentData.ListComponent.Read( br );
                         break;
-                    case Uld.ComponentData.ComponentType.ListItem:
-                        ret.Component = Uld.ComponentData.ListItemComponent.Read( br );
+                    case Uld.ComponentData.ComponentType.DropDown:
+                        ret.Component = Uld.ComponentData.DropDownComponent.Read( br );
                         break;
                     case Uld.ComponentData.ComponentType.Tabbed:
                         ret.Component = Uld.ComponentData.TabComponent.Read( br );
@@ -405,6 +415,9 @@ namespace Lumina.Data.Parsing.Uld
                         break;
                     case Uld.ComponentData.ComponentType.ScrollBar:
                         ret.Component = Uld.ComponentData.ScrollBarComponent.Read( br );
+                        break;
+                    case Uld.ComponentData.ComponentType.ListItem:
+                        ret.Component = Uld.ComponentData.ListItemComponent.Read( br );
                         break;
                     case Uld.ComponentData.ComponentType.Icon:
                         ret.Component = Uld.ComponentData.IconComponent.Read( br );
@@ -435,6 +448,9 @@ namespace Lumina.Data.Parsing.Uld
                         break;
                 }
 
+                // adjust position because of inconsisty within the same ComponentList version...
+                br.BaseStream.Position = originalPos + ret.Offset;
+
                 ret.Nodes = new NodeData[ret.NodeCount];
                 for( int i = 0; i < ret.NodeCount; i++ )
                     ret.Nodes[ i ] = NodeData.Read( br, definedComponentList );
@@ -450,7 +466,7 @@ namespace Lumina.Data.Parsing.Uld
             public ushort KeyframeCount;
             public IKeyframe[] Frames;
 
-            public static KeyGroup Read( BinaryReader br )
+            public static KeyGroup Read( LuminaBinaryReader br )
             {
                 KeyGroup ret = new KeyGroup();
                 ret.Usage = (KeyUsage)br.ReadUInt16();
@@ -556,7 +572,7 @@ namespace Lumina.Data.Parsing.Uld
 
             public KeyGroup[] KeyGroups;
 
-            public static FrameData Read( BinaryReader br )
+            public static FrameData Read( LuminaBinaryReader br )
             {
                 FrameData ret = new FrameData();
                 ret.StartFrame = br.ReadUInt32();
@@ -582,8 +598,10 @@ namespace Lumina.Data.Parsing.Uld
             public uint NumFrames;
             public FrameData[] FrameData;
 
-            public static Timeline Read( BinaryReader br )
+            public static Timeline Read( LuminaBinaryReader br )
             {
+                var pos = br.BaseStream.Position;
+
                 Timeline ret = new Timeline();
                 ret.Id = br.ReadUInt32();
                 ret.Offset = br.ReadUInt32();
@@ -593,6 +611,9 @@ namespace Lumina.Data.Parsing.Uld
                 ret.FrameData = new FrameData[ret.NumFrames];
                 for( int i = 0; i < ret.NumFrames; i++ )
                     ret.FrameData[ i ] = UldRoot.FrameData.Read( br );
+
+                br.BaseStream.Position = pos + ret.Offset;
+
                 return ret;
             }
         }
@@ -601,6 +622,7 @@ namespace Lumina.Data.Parsing.Uld
         {
             public uint Id;
             public AlignmentType AlignmentType;
+            public bool AssetsHaveThemeSupport;
             public short X;
             public short Y;
             public ushort NodeCount;
@@ -608,11 +630,13 @@ namespace Lumina.Data.Parsing.Uld
 
             public NodeData[] Nodes;
 
-            public static WidgetData Read( BinaryReader br, ComponentData[] definedComponentList )
+            public static WidgetData Read( LuminaBinaryReader br, ComponentData[] definedComponentList )
             {
                 WidgetData ret = new WidgetData();
                 ret.Id = br.ReadUInt32();
-                ret.AlignmentType = (AlignmentType)br.ReadInt32();
+                ret.AlignmentType = (AlignmentType)br.ReadByte();
+                ret.AssetsHaveThemeSupport = br.ReadBoolean();
+                br.BaseStream.Position += 2;
                 ret.X = br.ReadInt16();
                 ret.Y = br.ReadInt16();
                 ret.NodeCount = br.ReadUInt16();

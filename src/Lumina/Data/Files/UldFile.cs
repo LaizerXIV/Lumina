@@ -34,9 +34,10 @@ namespace Lumina.Data.Files
 
             Reader.Seek( preComponentPos + ComponentHeader.AssetListOffset );
             AssetList = UldRoot.PartHeader.Read( Reader );
+            var assetListVersionU32 = uint.Parse( new string( AssetList.Version ) );
             AssetData = new UldRoot.TextureEntry[AssetList.ElementCount];
             for( var i = 0; i < AssetList.ElementCount; i++ )
-                AssetData[ i ] = UldRoot.TextureEntry.Read( Reader );
+                AssetData[ i ] = UldRoot.TextureEntry.Read( Reader, assetListVersionU32 );
 
             Reader.Seek( preComponentPos + ComponentHeader.PartListOffset );
             PartList = UldRoot.PartHeader.Read( Reader );
@@ -56,8 +57,8 @@ namespace Lumina.Data.Files
             for( var i = 0; i < TimelineList.ElementCount; i++ )
                 Timelines[ i ] = UldRoot.Timeline.Read( Reader );
 
-            var preSecondHeader = Reader.BaseStream.Position;
             Reader.Seek( basePos + CombineHeader.WidgetOffset );
+            var preSecondHeader = Reader.BaseStream.Position;
             SecondHeader = UldRoot.AtkHeader.Read( Reader );
 
             Reader.Seek( preSecondHeader + SecondHeader.WidgetOffset );

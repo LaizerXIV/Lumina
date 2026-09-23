@@ -1,4 +1,5 @@
 using Lumina.Data;
+using Lumina.Excel;
 
 namespace Lumina
 {
@@ -31,13 +32,13 @@ namespace Lumina
         public bool PanicOnSheetChecksumMismatch { get; set; } = true;
 
         /// <summary>
-        /// If enabled, when a cast fails in an excel sheet, an InvalidCastException will be thrown instead of the types default value being inserted instead.
+        /// The resolver delegate to use when resolving RSV strings. Leave <see langword="null"/> if you don't need it.
         /// </summary>
-        public bool ExcelSheetStrictCastingEnabled { get; set; } = false;
+        public ExcelModule.ResolveRsvDelegate? RsvResolver { get; set; }
 
         /// <summary>
-        /// Whether or not known RSV values in sheets should be resolved when loading sheets
+        /// If enabled, resources will be loaded using multiple threads.
         /// </summary>
-        public bool ResolveKnownRsvSheetValues { get; set; } = true;
+        public bool LoadMultithreaded { get; set; } = false;
     }
 }

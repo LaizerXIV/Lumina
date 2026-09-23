@@ -3,17 +3,22 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Lumina.Data;
 using Lumina.Data.Structs;
+using Lumina.Data.Structs.Excel;
 using Lumina.Excel;
+using Lumina.Excel.Exceptions;
 using Lumina.Misc;
 
 // ReSharper disable MemberCanBePrivate.Global
 
 namespace Lumina
 {
-    public class GameData
+    public class GameData : IDisposable
     {
+        ~GameData() => Dispose( false );
+
         /// <summary>
         /// The current data path that Lumina is using to load files.
         /// </summary>
@@ -33,13 +38,13 @@ namespace Lumina
         /// <summary>
         /// Reading PS3 dats on a LE machine means we need to convert endianness from BE where applicable
         /// </summary>
+        [Obsolete( "Use property \"ConvertEndianness\" from \"LuminaBinaryReader\" instead" )]
         public bool ShouldConvertEndianness => Options.CurrentPlatform == PlatformId.PS3 && BitConverter.IsLittleEndian;
         
         /// <summary>
         /// Provides access to EXD/EXH data, internally called Excel.
         ///
-        /// Loaded by default on init unless you opt not to load it. Can be loaded at a later time by calling Lumina.InitExcelModule or optionally
-        /// constructing your own Excel.ExcelModule.
+        /// Loaded by default on init unless you opt not to load it.
         /// </summary>
         public ExcelModule Excel { get; private set; }
         
@@ -48,6 +53,12 @@ namespace Lumina
         /// easily defer file loading onto another thread.
         /// </summary>
         public FileHandleManager FileHandleManager { get; private set; }
+
+        /// <summary>
+        /// Provides a pool for file streams for .dat files.
+        /// </summary>
+        /// <remarks>The pool will be disposed when <see cref="Dispose()"/> is called.</remarks>
+        public SqPackStreamPool? StreamPool { get; set; }
         
         internal ILogger? Logger { get; private set; }
         
@@ -78,10 +89,21 @@ namespace Lumina
                 throw new ArgumentException( "the data path arg must point to the sqpack directory", nameof( dataPath ) );
             }
 
-            Repositories = new Dictionary< string, Repository >();
-            foreach( var repo in DataPath.GetDirectories() )
+            if( options?.LoadMultithreaded == true )
             {
-                Repositories[ repo.Name.ToLowerInvariant() ] = new Repository( repo, this );
+                var repoTasks = DataPath.GetDirectories().Select( repo => Task.Run( () => new Repository( repo, this ) ) );
+                Repositories = Task.WhenAll( repoTasks )
+                    .GetAwaiter()
+                    .GetResult()
+                    .ToDictionary( x => x.Name.ToLowerInvariant(), x => x );
+            }
+            else
+            {
+                Repositories = new Dictionary< string, Repository >();
+                foreach( var repo in DataPath.GetDirectories() )
+                {
+                    Repositories[ repo.Name.ToLowerInvariant() ] = new Repository( repo, this );
+                }
             }
 
             Excel = new ExcelModule( this );
@@ -100,29 +122,45 @@ namespace Lumina
             Logger = logger ?? throw new ArgumentNullException( nameof( logger ) );
         }
 
+        /// <inheritdoc cref="ParseFilePath(ReadOnlySpan{char})"/>
+        public static ParsedFilePath? ParseFilePath( string path )
+            => ParseFilePath( path.AsSpan() );
+
         /// <summary>
         /// Parses a game filesystem path and extracts information and hashes the path provided. 
         /// </summary>
         /// <param name="path">A game filesystem path</param>
         /// <returns>A <see cref="ParsedFilePath"/> which contains extracted info from the path, along with the hashes used to access the file index</returns>
-        public static ParsedFilePath? ParseFilePath( string path )
+        public static ParsedFilePath? ParseFilePath( ReadOnlySpan<char> path )
         {
-            if( string.IsNullOrWhiteSpace( path ) )
+            if( path.IsWhiteSpace() )
                 return null;
             
             // validate path slightly
             if( path[ ^1 ] == '/' )
                 return null;
 
-            path = path.ToLowerInvariant().Trim();
-            
-            var pathParts = path.Split( '/' );
-            var category = pathParts.First();
+            // Game paths can not be longer than MAX_PATH.
+            if( path.Length >= 260 )
+                return null;
 
-            var hash = GetFileHash( path );
-            var hash2 = Crc32.Get( path );
+            // Has to have at least one folder.
+            var directorySplit = path.LastIndexOf( '/' );
+            if( directorySplit < 0 )
+                return null;
 
-            var repo = pathParts[ 1 ];
+            Span<char> lowerPath = stackalloc char[260];
+            var length = path.ToLowerInvariant( lowerPath );
+            lowerPath[length] = '\0';
+            lowerPath         = lowerPath[ ..length ];
+            lowerPath         = lowerPath.Trim();
+
+            var hash           = GetFileHash( lowerPath[..directorySplit], lowerPath[(directorySplit + 1)..] );
+            var hash2          = Crc32.Get( lowerPath );
+
+            var                pathParts = lowerPath.Split( '/' );
+            ReadOnlySpan<char> category  = pathParts.MoveNext() ? lowerPath[pathParts.Current] : [];
+            ReadOnlySpan<char> repo      = pathParts.MoveNext() ? lowerPath[pathParts.Current] : [];
             // todo: supports up to ex9, so we've got another ~11 years before this breaks
             if( repo[ 0 ] != 'e' || repo[ 1 ] != 'x' || !char.IsDigit( repo[ 2 ] ) )
             {
@@ -131,12 +169,19 @@ namespace Lumina
 
             return new ParsedFilePath
             {
-                Category = category,
+                Category = category.ToString(),
                 IndexHash = hash,
                 Index2Hash = hash2,
-                Repository = repo,
-                Path = path
+                Repository = repo.ToString(),
+                Path = lowerPath.ToString(),
             };
+        }
+
+        /// <inheritdoc/>
+        public void Dispose()
+        {
+            Dispose( true );
+            GC.SuppressFinalize( this );
         }
 
         /// <summary>
@@ -177,10 +222,11 @@ namespace Lumina
         /// Load a defined file given a filesystem path
         /// </summary>
         /// <param name="path">A relative or absolute path to the file to load</param>
+        /// <param name="origPath">The original file path in SqPack, required for reading some files (e.g. materials)</param>
         /// <typeparam name="T">The type of <see cref="FileResource"/> to load the raw file in to</typeparam>
         /// <returns>The requested file if found, null if not</returns>
         /// <exception cref="FileNotFoundException">The path given doesn't point to an existing file</exception>
-        public T GetFileFromDisk< T >( string path ) where T : FileResource
+        public T GetFileFromDisk< T >( string path, string? origPath = null ) where T : FileResource
         {
             SetCurrentContext();
             
@@ -193,9 +239,11 @@ namespace Lumina
 
             var file = Activator.CreateInstance< T >();
             file.Data = fileContent;
-            // todo: this is kind of fucked, we should probably choose one or the other and not both
-            file.FileStream = new MemoryStream( file.Data, false );
-            file.Reader = new BinaryReader( file.FileStream );
+            if( origPath != null )
+            {
+                file.FilePath = ParseFilePath( origPath )!;
+            }
+            file.Reader = new LuminaBinaryReader( file.Data, Options.CurrentPlatform );
             file.LoadFile();
 
             return file;
@@ -222,11 +270,7 @@ namespace Lumina
             return null;
         }
 
-        /// <summary>
-        /// Check if a file exists anywhere by checking whether the hash exists in any index
-        /// </summary>
-        /// <param name="path">The full path of the file</param>
-        /// <returns>True if the file exists</returns>
+        /// <inheritdoc cref="FileExists(ReadOnlySpan{char})"/>
         public bool FileExists( string path )
         {
             var parsedPath = ParseFilePath( path );
@@ -242,41 +286,89 @@ namespace Lumina
         }
 
         /// <summary>
+        /// Check if a file exists anywhere by checking whether the hash exists in any index
+        /// </summary>
+        /// <param name="path">The full path of the file</param>
+        /// <returns>True if the file exists</returns>
+        public bool FileExists( ReadOnlySpan<char> path )
+        {
+            var parsedPath = ParseFilePath( path );
+            if( parsedPath == null )
+                return false;
+
+            if( Repositories.TryGetValue( parsedPath.Repository, out var repo ) )
+            {
+                return repo.FileExists( parsedPath.Category, parsedPath );
+            }
+
+            return false;
+        }
+
+        /// <inheritdoc cref="GetFileHash(ReadOnlySpan{char})"/>
+        public static UInt64 GetFileHash( string path )
+            => GetFileHash( path.AsSpan() );
+
+        /// <summary>
         /// Returns the index variant of a file hash
         /// </summary>
         /// <param name="path">The full path of the file</param>
         /// <returns>A U64 containing a split hash of the folder and file CRC32s</returns>
-        public static UInt64 GetFileHash( string path )
+        public static UInt64 GetFileHash( ReadOnlySpan<char> path )
         {
-            var pathParts = path.Split( '/' );
-            var filename = pathParts[ ^1 ];
-            var folder = path.Substring( 0, path.LastIndexOf( '/' ) );
+            var directorySplit = path.LastIndexOf( '/' );
+            if( directorySplit < 0 )
+                return Crc32.Get( path );
 
-            return (UInt64) Crc32.Get( folder ) << 32 | Crc32.Get( filename );
+            return GetFileHash( path[..directorySplit] ) << 32 | Crc32.Get( path[(directorySplit + 1)..] );
         }
 
         /// <summary>
-        /// Attempts to load the base excel sheet given it's implementing row parser
+        /// Returns the index variant of a file hash
         /// </summary>
-        /// <typeparam name="T">A class that implements <see cref="ExcelRow"/> to parse rows</typeparam>
-        /// <returns>An <see cref="ExcelSheet{T}"/> if the sheet exists, null if it does not</returns>
-        public ExcelSheet< T >? GetExcelSheet< T >() where T : ExcelRow
+        /// <param name="folder">The full path of the directory the file is in without trailing '/'.</param>
+        /// <param name="filename">The file name with extension.</param>
+        /// <returns>A U64 containing a split hash of the folder and file CRC32s</returns>
+        public static UInt64 GetFileHash( ReadOnlySpan<char> folder, ReadOnlySpan<char> filename )
         {
-            return Excel.GetSheet< T >();
+            return (UInt64)Crc32.Get( folder ) << 32 | Crc32.Get( filename );
         }
 
-        /// <summary>
-        /// Attempts to load the base excel sheet with a specific language
-        /// </summary>
+        /// <summary>Loads an <see cref="ExcelSheet{T}"/>. Returns <see langword="null"/> if the sheet does not exist, has an invalid column hash or unsupported variant, or was requested with an unsupported language.</summary>
+        /// <param name="language">The requested sheet language. Leave <see langword="null"/> or empty to use the default language.</param>
+        /// <param name="name">The requested explicit sheet name. Leave <see langword="null"/> to use <typeparamref name="T"/>'s sheet name. Explicit names are necessary for quest/dungeon/cutscene sheets.</param>
+        /// <returns>An excel sheet corresponding to <typeparamref name="T"/> and <paramref name="language"/> that may be created anew or
+        /// reused from a previous invocation of this method.</returns>
         /// <remarks>
-        /// If the language requested doesn't exist for the file, this will silently be ignored and it will return a sheet with the default language: <see cref="Language.None"/>
+        /// If the requested language doesn't exist for the file where <paramref name="language"/> is not <see cref="Language.None"/>, the
+        /// language-neutral sheet using <see cref="Language.None"/> will be loaded instead. If the language-neutral sheet does not exist, then the function
+        /// will return <see langword="null"/>.
         /// </remarks>
-        /// <param name="language">The requested sheet language</param>
-        /// <typeparam name="T">A class that implements <see cref="ExcelRow"/> to parse rows</typeparam>
-        /// <returns>An <see cref="ExcelSheet{T}"/> if the sheet exists, null if it does not</returns>
-        public ExcelSheet< T >? GetExcelSheet< T >( Language language ) where T : ExcelRow
+        /// <exception cref="SheetNameEmptyException">Sheet name was not specified neither via <typeparamref name="T"/>'s <see cref="SheetAttribute.Name"/> nor <paramref name="name"/>.</exception>
+        /// <exception cref="SheetAttributeMissingException"><typeparamref name="T"/> does not have a valid <see cref="SheetAttribute"/>.</exception>
+        public ExcelSheet< T >? GetExcelSheet< T >( Language? language = null, string? name = null ) where T : struct, IExcelRow< T >
         {
-            return Excel.GetSheet< T >( language );
+            try
+            {
+                return Excel.GetSheet< T >( language, name );
+            }
+            catch( Exception e ) when ( e is SheetNotFoundException or MismatchedColumnHashException or NotSupportedException or UnsupportedLanguageException )
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Loads a <see cref="SubrowExcelSheet{T}"/>. Returns <see langword="null"/> if the sheet does not exist, has an invalid column hash or unsupported variant, or was requested with an unsupported language.</summary>
+        /// <inheritdoc cref="GetExcelSheet{T}(Nullable{Language}, string?)"/>
+        public SubrowExcelSheet< T >? GetSubrowExcelSheet< T >( Language? language = null, string? name = null ) where T : struct, IExcelSubrow< T >
+        {
+            try
+            {
+                return Excel.GetSubrowSheet< T >( language, name );
+            }
+            catch( Exception e ) when ( e is SheetNotFoundException or MismatchedColumnHashException or NotSupportedException or UnsupportedLanguageException )
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -297,6 +389,17 @@ namespace Lumina
         public void ProcessFileHandleQueue()
         {
             FileHandleManager.ProcessQueue();
+        }
+
+        /// <summary>Disposes this object.</summary>
+        /// <param name="disposing">Whether this function is being called from <see cref="Dispose"/>.</param>
+        protected virtual void Dispose( bool disposing )
+        {
+            if( disposing )
+            {
+                StreamPool?.Dispose();
+                StreamPool = null;
+            }
         }
 
         internal void SetCurrentContext()

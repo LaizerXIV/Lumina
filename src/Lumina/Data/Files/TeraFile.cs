@@ -1,5 +1,5 @@
-﻿using System.Numerics;
-using Lumina.Extensions;
+using System.Buffers.Binary;
+using System.Numerics;
 
 #pragma warning disable 649
 

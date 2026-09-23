@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
 using Lumina.Data.Attributes;
 using Lumina.Data.Parsing;
@@ -20,7 +18,7 @@ namespace Lumina.Data.Files.Pcb
 
             public List< ResourceNode > Children;
 
-            public static PcbResourceHeader Read( BinaryReader reader )
+            public static PcbResourceHeader Read( LuminaBinaryReader reader )
             {
                 var header = new PcbResourceHeader
                 {
@@ -29,9 +27,6 @@ namespace Lumina.Data.Files.Pcb
                     TotalNodes = reader.ReadUInt32(),
                     TotalPolygons = reader.ReadUInt32()
                 };
-
-                if( header.TotalNodes == 0 )
-                    return header;
 
                 header.Children = new List< ResourceNode >();
 
@@ -59,7 +54,7 @@ namespace Lumina.Data.Files.Pcb
 
             public List< ResourceNode > Children;
 
-            public static ResourceNode ReadWithCount( BinaryReader reader, out int totalNodesRead )
+            public static ResourceNode ReadWithCount( LuminaBinaryReader reader, out int totalNodesRead )
             {
                 totalNodesRead = 1;
 
@@ -102,9 +97,17 @@ namespace Lumina.Data.Files.Pcb
                     header.Vertices[ i ] = Common.Vector3.Read( reader );
                 }
 
+                var xFactor = Math.Abs((header.BoundingBox.Max.X - header.BoundingBox.Min.X) );
+                var yFactor = Math.Abs((header.BoundingBox.Max.Y - header.BoundingBox.Min.Y) );
+                var zFactor = Math.Abs((header.BoundingBox.Max.Z - header.BoundingBox.Min.Z) );
+
                 for( var i = numVertFloat32; i < numVertFloat32 + numVertFloat16; i++ )
                 {
-                    header.Vertices[ i ] = Common.Vector3.Read16( reader );
+                    var vertFloat16 = Common.Vector3.Read16( reader );
+                    vertFloat16.X = vertFloat16.X * xFactor + header.BoundingBox.Min.X;
+                    vertFloat16.Y = vertFloat16.Y * yFactor + header.BoundingBox.Min.Y;
+                    vertFloat16.Z = vertFloat16.Z * zFactor + header.BoundingBox.Min.Z;
+                    header.Vertices[ i ] = vertFloat16;
                 }
 
                 for( var i = 0; i < header.Polygons.Length; i++ )
@@ -122,7 +125,7 @@ namespace Lumina.Data.Files.Pcb
             public byte[] VertexIndex;
             public ushort Unknown;
 
-            public static Polygon Read( BinaryReader reader )
+            public static Polygon Read( LuminaBinaryReader reader )
             {
                 var polygon = new Polygon
                 {

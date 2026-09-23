@@ -1,6 +1,6 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.IO;
 using Lumina.Extensions;
 
 // ReSharper disable InconsistentNaming
@@ -54,7 +54,7 @@ namespace Lumina.Data.Parsing
             public bool EnableEdgeGeometry;
             private byte Padding;
 
-            public static ModelFileHeader Read( BinaryReader br )
+            public static ModelFileHeader Read( LuminaBinaryReader br )
             {
                 ModelFileHeader ret = new ModelFileHeader();
                 ret.Version = br.ReadUInt32();
@@ -62,10 +62,10 @@ namespace Lumina.Data.Parsing
                 ret.RuntimeSize = br.ReadUInt32();
                 ret.VertexDeclarationCount = br.ReadUInt16();
                 ret.MaterialCount = br.ReadUInt16();
-                ret.VertexOffset = br.ReadStructures< UInt32 >( 3 ).ToArray();
-                ret.IndexOffset = br.ReadStructures< UInt32 >( 3 ).ToArray();
-                ret.VertexBufferSize = br.ReadStructures< UInt32 >( 3 ).ToArray();
-                ret.IndexBufferSize = br.ReadStructures< UInt32 >( 3 ).ToArray();
+                ret.VertexOffset = br.ReadUInt32Array( 3 );
+                ret.IndexOffset = br.ReadUInt32Array( 3 );
+                ret.VertexBufferSize = br.ReadUInt32Array( 3 );
+                ret.IndexBufferSize = br.ReadUInt32Array( 3 );
                 ret.LodCount = br.ReadByte();
                 ret.EnableIndexBufferStreaming = br.ReadBoolean();
                 ret.EnableEdgeGeometry = br.ReadBoolean();
@@ -81,7 +81,7 @@ namespace Lumina.Data.Parsing
             // There are always 17, but stop when stream = -1
             public VertexElement[] VertexElements;
 
-            public static VertexDeclarationStruct Read( BinaryReader br )
+            public static VertexDeclarationStruct Read( LuminaBinaryReader br )
             {
                 VertexDeclarationStruct ret = new VertexDeclarationStruct();
 
@@ -179,7 +179,7 @@ namespace Lumina.Data.Parsing
             public float[] Translate;
             public float[] Rotate;
 
-            public static ElementIdStruct Read( BinaryReader br )
+            public static ElementIdStruct Read( LuminaBinaryReader br )
             {
                 ElementIdStruct ret = new ElementIdStruct();
                 ret.ElementId = br.ReadUInt32();
@@ -256,7 +256,7 @@ namespace Lumina.Data.Parsing
 
             public byte VertexStreamCount;
 
-            public static MeshStruct Read( BinaryReader br )
+            public static MeshStruct Read( LuminaBinaryReader br )
             {
                 MeshStruct ret = new MeshStruct();
                 ret.VertexCount = br.ReadUInt16();
@@ -267,7 +267,7 @@ namespace Lumina.Data.Parsing
                 ret.SubMeshCount = br.ReadUInt16();
                 ret.BoneTableIndex = br.ReadUInt16();
                 ret.StartIndex = br.ReadUInt32();
-                ret.VertexBufferOffset = br.ReadStructures< UInt32 >( 3 ).ToArray();
+                ret.VertexBufferOffset = br.ReadUInt32Array( 3 );
                 ret.VertexBufferStride = br.ReadBytes( 3 );
                 ret.VertexStreamCount = br.ReadByte();
                 return ret;
@@ -309,10 +309,10 @@ namespace Lumina.Data.Parsing
             public byte BoneCount;
             private byte[] Padding;
 
-            public static BoneTableStruct Read( BinaryReader br )
+            public static BoneTableStruct Read( LuminaBinaryReader br )
             {
                 BoneTableStruct ret = new BoneTableStruct();
-                ret.BoneIndex = br.ReadStructures< UInt16 >( 64 ).ToArray();
+                ret.BoneIndex = br.ReadUInt16Array( 64 );
                 ret.BoneCount = br.ReadByte();
                 ret.Padding = br.ReadBytes( 3 );
                 return ret;
@@ -325,27 +325,37 @@ namespace Lumina.Data.Parsing
             public ushort[] ShapeMeshStartIndex;
             public ushort[] ShapeMeshCount;
 
-            public static ShapeStruct Read( BinaryReader br )
+            public static ShapeStruct Read( LuminaBinaryReader br )
             {
                 ShapeStruct ret = new ShapeStruct();
                 ret.StringOffset = br.ReadUInt32();
-                ret.ShapeMeshStartIndex = br.ReadStructures< UInt16 >( 3 ).ToArray();
-                ret.ShapeMeshCount = br.ReadStructures< UInt16 >( 3 ).ToArray();
+                ret.ShapeMeshStartIndex = br.ReadUInt16Array( 3 );
+                ret.ShapeMeshCount = br.ReadUInt16Array( 3 );
                 return ret;
             }
         }
 
         public struct ShapeMeshStruct
         {
-            public uint StartIndex;
+            /// <summary>
+            /// From TT: The offset to the index block this Shape Data should be replacing in.
+            /// This is how Shape Data is tied to each mesh.
+            /// </summary>
+            public uint MeshIndexOffset;
             public uint ShapeValueCount;
             public uint ShapeValueOffset;
         }
 
         public struct ShapeValueStruct
         {
-            public ushort Offset;
-            public ushort Value;
+            /// <summary>
+            /// PROBABLY: Index into the Indices array of a mesh.
+            /// </summary>
+            public ushort BaseIndicesIndex;
+            /// <summary>
+            /// PROBABLY: Index into the (without transformation probably unused) vertex of a mesh.
+            /// </summary>
+            public ushort ReplacingVertexIndex;
         }
 
         public struct BoundingBoxStruct
@@ -353,11 +363,11 @@ namespace Lumina.Data.Parsing
             public float[] Min;
             public float[] Max;
 
-            public static BoundingBoxStruct Read( BinaryReader br )
+            public static BoundingBoxStruct Read( LuminaBinaryReader br )
             {
                 BoundingBoxStruct ret = new BoundingBoxStruct();
-                ret.Min = br.ReadStructures< Single >( 4 ).ToArray();
-                ret.Max = br.ReadStructures< Single >( 4 ).ToArray();
+                ret.Min = br.ReadSingleArray( 4 );
+                ret.Max = br.ReadSingleArray( 4 );
                 return ret;
             }
         }

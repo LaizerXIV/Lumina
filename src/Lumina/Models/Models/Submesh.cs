@@ -31,7 +31,7 @@ namespace Lumina.Models.Models
             int subMeshListIndex = currentMesh.SubMeshIndex + subMeshIndex;
             var currentSubMesh = model.File.Submeshes[ subMeshListIndex ];
 
-            IndexOffset = currentSubMesh.IndexOffset;
+            IndexOffset = currentSubMesh.IndexOffset - currentMesh.StartIndex;
             IndexNum = currentSubMesh.IndexCount;
 
             // AttributeIndexMask is a bit-based index mask
@@ -54,6 +54,8 @@ namespace Lumina.Models.Models
             int boneEndIndex = currentSubMesh.BoneStartIndex + currentSubMesh.BoneCount;
             for( int i = currentSubMesh.BoneStartIndex; i < boneEndIndex; i++ )
             {
+                // only run if boneIndex is valid
+                if( i >= model.File.SubmeshBoneMap.Length ) continue;
                 var boneIndex = model.File.SubmeshBoneMap[ i ];
                 var boneOffset = model.File.BoneNameOffsets[ boneIndex ];
                 string boneName = model.StringOffsetToStringMap[ (int) boneOffset ];
